@@ -40,9 +40,10 @@ export async function POST(req: NextRequest) {
   let filename: string;
   let content: Record<string, string>;
   let targetLanguages: TargetLanguage[];
+  let referenceContent: Record<string, string> | undefined;
 
   try {
-    ({ filename, content, targetLanguages } = await req.json());
+    ({ filename, content, targetLanguages, referenceContent } = await req.json());
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
@@ -57,7 +58,19 @@ export async function POST(req: NextRequest) {
 
   try {
     for (const chunk of chunks) {
-      const userMessage = JSON.stringify(chunk, null, 2);
+      let userMessage: string;
+      if (referenceContent) {
+        const combined = Object.fromEntries(
+          Object.keys(chunk).map((key) => [
+            key,
+            { ko: chunk[key], en: referenceContent[key] ?? '' },
+          ])
+        );
+        userMessage = JSON.stringify(combined, null, 2);
+      } else {
+        userMessage = JSON.stringify(chunk, null, 2);
+      }
+
       const message = await client.messages.create({
         model: 'claude-opus-4-6',
         max_tokens: 8096,

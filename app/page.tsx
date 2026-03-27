@@ -10,6 +10,7 @@ import { ALL_LANGUAGES, TargetLanguage } from '@/lib/glossary';
 
 export default function Home() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [referenceFiles, setReferenceFiles] = useState<Record<string, Record<string, string>>>({});
   const [selectedLanguages, setSelectedLanguages] = useState<TargetLanguage[]>(ALL_LANGUAGES);
   const [fileStatuses, setFileStatuses] = useState<Record<string, FileStatusEntry>>({});
   const [results, setResults] = useState<TranslationResult[]>([]);
@@ -27,6 +28,14 @@ export default function Home() {
       statuses[f.filename] = { filename: f.filename, keyCount: f.keyCount, status: 'pending' };
     }
     setFileStatuses(statuses);
+  }
+
+  function handleReferenceFiles(files: UploadedFile[]) {
+    const map: Record<string, Record<string, string>> = {};
+    for (const f of files) {
+      map[f.filename] = f.content;
+    }
+    setReferenceFiles(map);
   }
 
   function setStatus(filename: string, status: FileStatus, error?: string) {
@@ -50,6 +59,7 @@ export default function Home() {
           body: JSON.stringify({
             filename: file.filename,
             content: file.content,
+            referenceContent: referenceFiles[file.filename],
             targetLanguages: selectedLanguages,
           }),
         });
@@ -99,8 +109,19 @@ export default function Home() {
         </section>
 
         <section className="bg-white rounded-2xl border border-gray-200 p-6 space-y-3">
-          <h2 className="text-sm font-semibold text-gray-700">파일 업로드</h2>
+          <h2 className="text-sm font-semibold text-gray-700">한국어 소스 파일</h2>
           <FileUpload onFiles={handleFiles} disabled={isTranslating} />
+        </section>
+
+        <section className="bg-white rounded-2xl border border-gray-200 p-6 space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-700">영어 참고 파일 <span className="text-gray-400 font-normal">(선택)</span></h2>
+            <p className="text-xs text-gray-400 mt-0.5">한국어로 번역하기 애매할 때 참고합니다. 파일명이 소스 파일과 동일해야 합니다.</p>
+          </div>
+          <FileUpload onFiles={handleReferenceFiles} disabled={isTranslating} />
+          {Object.keys(referenceFiles).length > 0 && (
+            <p className="text-xs text-green-600">{Object.keys(referenceFiles).length}개 참고 파일 로드됨: {Object.keys(referenceFiles).join(', ')}</p>
+          )}
         </section>
 
         {uploadedFiles.length > 0 && (
