@@ -8,34 +8,53 @@ import DownloadButton from '@/components/DownloadButton';
 import { TranslationResult } from '@/lib/zipBuilder';
 import { ALL_LANGUAGES, TargetLanguage } from '@/lib/glossary';
 
+const HANGUL = /[\uAC00-\uD7A3]/;
+
+function hasHangul(content: Record<string, string>): boolean {
+  return Object.values(content).some((v) => HANGUL.test(v));
+}
+
+function hasNonEmptyContent(content: Record<string, string>): boolean {
+  return Object.values(content).some((v) => v.trim() !== '');
+}
+
 export default function Home() {
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
-  const [referenceFiles, setReferenceFiles] = useState<Record<string, Record<string, string>>>({});
+  const [sourceFiles, setSourceFiles] = useState<UploadedFile[]>([]);
+  const [mergedReference, setMergedReference] = useState<Record<string, string>>({});
+  const [referenceCount, setReferenceCount] = useState(0);
   const [selectedLanguages, setSelectedLanguages] = useState<TargetLanguage[]>(ALL_LANGUAGES);
   const [fileStatuses, setFileStatuses] = useState<Record<string, FileStatusEntry>>({});
   const [results, setResults] = useState<TranslationResult[]>([]);
   const [isTranslating, setIsTranslating] = useState(false);
 
   const allDone =
-    uploadedFiles.length > 0 &&
-    uploadedFiles.every((f) => fileStatuses[f.filename]?.status === 'done');
+    sourceFiles.length > 0 &&
+    sourceFiles.every((f) => fileStatuses[f.filename]?.status === 'done');
 
-  function handleFiles(files: UploadedFile[]) {
-    setUploadedFiles(files);
-    setResults([]);
-    const statuses: Record<string, FileStatusEntry> = {};
+  function handleAllFiles(files: UploadedFile[]) {
+    const sources: UploadedFile[] = [];
+    const merged: Record<string, string> = {};
+    let refCount = 0;
+
     for (const f of files) {
+      if (hasHangul(f.content)) {
+        sources.push(f);
+      } else if (hasNonEmptyContent(f.content)) {
+        Object.assign(merged, f.content);
+        refCount++;
+      }
+    }
+
+    setSourceFiles(sources);
+    setMergedReference(merged);
+    setReferenceCount(refCount);
+    setResults([]);
+
+    const statuses: Record<string, FileStatusEntry> = {};
+    for (const f of sources) {
       statuses[f.filename] = { filename: f.filename, keyCount: f.keyCount, status: 'pending' };
     }
     setFileStatuses(statuses);
-  }
-
-  function handleReferenceFiles(files: UploadedFile[]) {
-    const map: Record<string, Record<string, string>> = {};
-    for (const f of files) {
-      map[f.filename] = f.content;
-    }
-    setReferenceFiles(map);
   }
 
   function setStatus(filename: string, status: FileStatus, error?: string) {
@@ -46,11 +65,11 @@ export default function Home() {
   }
 
   async function handleTranslate() {
-    if (!uploadedFiles.length || !selectedLanguages.length) return;
+    if (!sourceFiles.length || !selectedLanguages.length) return;
     setIsTranslating(true);
     setResults([]);
 
-    for (const file of uploadedFiles) {
+    for (const file of sourceFiles) {
       setStatus(file.filename, 'translating');
       try {
         const res = await fetch('/api/translate', {
@@ -59,7 +78,7 @@ export default function Home() {
           body: JSON.stringify({
             filename: file.filename,
             content: file.content,
-            referenceContent: referenceFiles[file.filename],
+            referenceContent: Object.keys(mergedReference).length > 0 ? mergedReference : undefined,
             targetLanguages: selectedLanguages,
           }),
         });
@@ -84,7 +103,7 @@ export default function Home() {
     setIsTranslating(false);
   }
 
-  const statusList = uploadedFiles.map(
+  const statusList = sourceFiles.map(
     (f) =>
       fileStatuses[f.filename] ?? {
         filename: f.filename,
@@ -95,44 +114,61 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-gray-50 py-12 px-4">
-      <div className="max-w-2xl mx-auto space-y-8">
+      <div className="max-w-2xl mx-auto space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">셔클 번역봇</h1>
           <p className="text-sm text-gray-500 mt-1">
-            한국어 JSON 로케일 파일을 업로드하면 자동으로 다국어 번역 후 ZIP으로 다운로드합니다.
+            JSON 로케일 파일을 업로드하면 자동으로 다국어 번역 후 ZIP으로 다운로드합니다.
           </p>
         </div>
 
+        {/* Step 1 */}
         <section className="bg-white rounded-2xl border border-gray-200 p-6 space-y-3">
-          <h2 className="text-sm font-semibold text-gray-700">번역 언어 선택</h2>
-          <LanguageSelector selected={selectedLanguages} onChange={setSelectedLanguages} disabled={isTranslating} />
-        </section>
-
-        <section className="bg-white rounded-2xl border border-gray-200 p-6 space-y-3">
-          <h2 className="text-sm font-semibold text-gray-700">한국어 소스 파일</h2>
-          <FileUpload onFiles={handleFiles} disabled={isTranslating} />
-        </section>
-
-        <section className="bg-white rounded-2xl border border-gray-200 p-6 space-y-3">
-          <div>
-            <h2 className="text-sm font-semibold text-gray-700">영어 참고 파일 <span className="text-gray-400 font-normal">(선택)</span></h2>
-            <p className="text-xs text-gray-400 mt-0.5">한국어로 번역하기 애매할 때 참고합니다. 파일명이 소스 파일과 동일해야 합니다.</p>
+          <div className="flex items-center gap-2">
+            <span className="flex items-center justify-center w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold shrink-0">1</span>
+            <h2 className="text-sm font-semibold text-gray-700">소스 파일을 업로드해주세요</h2>
           </div>
-          <FileUpload onFiles={handleReferenceFiles} disabled={isTranslating} />
-          {Object.keys(referenceFiles).length > 0 && (
-            <p className="text-xs text-green-600">{Object.keys(referenceFiles).length}개 참고 파일 로드됨: {Object.keys(referenceFiles).join(', ')}</p>
+          <p className="text-xs text-gray-400 pl-8">
+            한국어 파일과 영어 참고 파일을 한꺼번에 드래그해도 됩니다. 한글이 포함된 파일은 자동으로 번역 소스로, 나머지는 참고 파일로 분류됩니다.
+          </p>
+          <FileUpload onFiles={handleAllFiles} disabled={isTranslating} />
+          {(sourceFiles.length > 0 || referenceCount > 0) && (
+            <div className="space-y-1 pt-1">
+              {sourceFiles.length > 0 && (
+                <p className="text-xs text-indigo-600">
+                  번역 소스 ({sourceFiles.length}개): {sourceFiles.map((f) => f.filename).join(', ')}
+                </p>
+              )}
+              {referenceCount > 0 && (
+                <p className="text-xs text-gray-400">영어 참고 ({referenceCount}개) 로드됨</p>
+              )}
+            </div>
           )}
         </section>
 
-        {uploadedFiles.length > 0 && (
-          <section className="space-y-3">
-            <h2 className="text-sm font-semibold text-gray-700">파일 목록</h2>
+        {/* Step 2 */}
+        <section className="bg-white rounded-2xl border border-gray-200 p-6 space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="flex items-center justify-center w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold shrink-0">2</span>
+            <h2 className="text-sm font-semibold text-gray-700">번역할 언어를 선택해주세요</h2>
+          </div>
+          <div className="pl-8">
+            <LanguageSelector
+              selected={selectedLanguages}
+              onChange={setSelectedLanguages}
+              disabled={isTranslating}
+            />
+          </div>
+        </section>
+
+        {sourceFiles.length > 0 && (
+          <section>
             <TranslationStatus entries={statusList} />
           </section>
         )}
 
-        {uploadedFiles.length > 0 && (
-          <div className="space-y-3">
+        {sourceFiles.length > 0 && (
+          <div>
             {!allDone && (
               <button
                 onClick={handleTranslate}
